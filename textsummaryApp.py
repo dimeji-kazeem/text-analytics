@@ -1,134 +1,92 @@
 import streamlit as st
-from wordcloud import WordCloud
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
-from docx import Document
-import pdfplumber
-import nltk
-from gensim.summarization import summarize as gensim_summarize
-from sumy.nlp.tokenizers import Tokenizer
-from sumy.summarizers.text_rank import TextRankSummarizer
-from sumy.summarizers.lsa import LsaSummarizer
+import sqlite3
+import hashlib
 
+# Create or connect to the SQLite database
+conn = sqlite3.connect('user_database.db')
+c = conn.cursor()
 
-# Download NLTK data including stopwords
-nltk.download('stopwords')
+# Create a users table if it doesn't exist
+c.execute('''
+    CREATE TABLE IF NOT EXISTS testers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        first_name TEXT,
+        last_name TEXT,
+        email TEXT UNIQUE,
+        password TEXT
+    )
+''')
+conn.commit()
 
-from nltk.corpus import stopwords
+# Function to create a password hash
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
-# Get the list of English stopwords
-stop_words = set(stopwords.words('english'))
+# Streamlit app title
+st.title("Secure Text Summarization App")
 
-# Function to summarize text using Gensim TextRank
-def summarize_text_textrank(text, sentences_count):
-    parser = PlaintextParser.from_string(text, Tokenizer("english"))
-    summarizer = TextRankSummarizer()
-    summary = summarizer(parser.document, sentences_count)
-    return " ".join([str(sentence) for sentence in summary])
+# Sidebar for authentication
+st.sidebar.header("User Authentication")
+menu = st.sidebar.radio("Menu", ["Home", "Login", "Register", "Reset Password"])
 
-# Function to summarize text using Gensim LSA (Latent Semantic Analysis)
-def summarize_text_lsa(text, sentences_count):
-    summary = gensim_summarize(text, word_count=sentences_count * 20)
-    return summary
+# Main content
+if menu == "Home":
+    st.header("Welcome to the Text Summarization App")
+    st.write("Please log in or register to access the app's features.")
 
-# Function to summarize text using Sumy LsaSummarizer
-def summarize_text_lsa_sumy(text, sentences_count):
-    parser = PlaintextParser.from_string(text, Tokenizer("english"))
-    summarizer = LsaSummarizer()
-    summary = summarizer(parser.document, sentences_count)
-    return " ".join([str(sentence) for sentence in summary])
+elif menu == "Login":
+    st.header("Login")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+    login_button = st.button("Login")
 
-# Function to summarize text using Gensim TextRank
-def summarize_text_textrank(text, sentences_count=5):
-    parser = PlaintextParser.from_string(text, Tokenizer("english"))
-    summarizer = TextRankSummarizer()
-    summary = summarizer(parser.document, sentences_count)
-    return " ".join([str(sentence) for sentence in summary])
+    if login_button:
+        c.execute("SELECT * FROM testers WHERE email = ?", (email,))
+        user = c.fetchone()
+        if user and user[5] == hash_password(password):
+            st.success(f"Logged in as {user[1]} {user[2]} ({user[4]})")
 
-# Function to extract text from a Word document
-def extract_text_from_docx(file_path):
-    doc = Document(file_path)
-    text = '\n'.join([paragraph.text for paragraph in doc.paragraphs])
-    return text
+            st.subheader("Text Summarization")
+            input_text = st.text_area("Enter the text you want to summarize")
+            sentences_count = st.number_input("Number of sentences in the summary", min_value=1, max_value=10, value=5)
+            summarize_button = st.button("Summarize")
 
-# Function to extract text from a PDF file using pdfplumber
-def extract_text_from_pdf(file_path):
-    with pdfplumber.open(file_path) as pdf:
-        text = ""
-        for page in pdf.pages:
-            text += page.extract_text()
-    return text
+            if summarize_button:
+                # Implement text summarization logic here
+                st.subheader("Summary:")
+                st.write("Summary will appear here.")
 
-# Function to generate a word cloud
-def generate_word_cloud(text):
-    wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
-    return wordcloud
+        else:
+            st.error("Login failed. Please check your email and password.")
 
-# Function to analyze sentiment using NLTK's VADER
-def analyze_sentiment(text):
-    sia = SentimentIntensityAnalyzer()
-    sentiment = sia.polarity_scores(text)
-    return sentiment
+elif menu == "Register":
+    st.header("Register")
+    title = st.radio("Title", ["Mr.", "Mrs.", "Miss", "Ms."], index=0)
+    first_name = st.text_input("First Name")
+    last_name = st.text_input("Last Name")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+    password_confirmation = st.text_input("Password Confirmation", type="password")
+    register_button = st.button("Register")
 
-text_to_summarize = ""  # Initialize text_to_summarize
+    if register_button:
+        if password == password_confirmation:
+            hashed_password = hash_password(password)
+            c.execute("INSERT INTO testers (title, first_name, last_name, email, password) VALUES (?, ?, ?, ?, ?)",
+                      (title, first_name, last_name, email, hashed_password))
+            conn.commit()
+            st.success(f"Registered successfully as {title} {first_name} {last_name} ({email})")
+        else:
+            st.error("Password and password confirmation do not match.")
 
-st.title("Text Summarization and Analysis")
+elif menu == "Reset Password":
+    st.header("Reset Password")
+    email = st.text_input("Email")
+    reset_button = st.button("Reset Password")
 
-summarization_library = st.selectbox("Select a summarization library", ["textrank", "LSA", "Sumy LSA"])
+    if reset_button:
+        st.error("Password reset functionality is not implemented in this example.")
 
-source = st.selectbox("Select the data source", ["text", "file"])
-
-if source == "text":
-    input_text = st.text_area("Enter the text you want to summarize")
-    text_to_summarize = input_text
-elif source == "file":
-    uploaded_file = st.file_uploader("Upload a Word document or PDF", type=["docx", "pdf"])
-    
-    if uploaded_file is not None:
-        with st.spinner("Processing..."):
-            if uploaded_file.type == "application/pdf":
-                text_to_summarize = extract_text_from_pdf(uploaded_file)
-            elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-                text_to_summarize = extract_text_from_docx(uploaded_file)
-else:
-    st.warning("Please select a valid data source.")
-
-if text_to_summarize:
-    wordcloud = generate_word_cloud(text_to_summarize)
-    st.image(wordcloud.to_image())
-    
-    # User control for the number of words in the summary
-    sentences_count = st.number_input("Number of sentences in the summary", min_value=1, max_value=10, value=5)
-    
-    # Summarize button
-    if st.button("Summarize"):
-        if summarization_library == "textrank":
-            summary = summarize_text_textrank(text_to_summarize, sentences_count)
-        elif summarization_library == "LSA":
-            summary = summarize_text_lsa(text_to_summarize, sentences_count)
-        elif summarization_library == "Sumy LSA":
-            summary = summarize_text_lsa_sumy(text_to_summarize, sentences_count)
-        st.subheader("Summary:")
-        st.write(summary)
-        
-    # Sentiment button
-    if st.button("Sentiment Analysis"):
-        sentiment = analyze_sentiment(text_to_summarize)
-        st.subheader("Sentiment Analysis:")
-        st.write(f"Positive: {sentiment['pos']:.2%}")
-        st.write(f"Negative: {sentiment['neg']:.2%}")
-        st.write(f"Neutral: {sentiment['neu']:.2%}")
-        st.write(f"Compound Score: {sentiment['compound']:.2f}")
-    
-    # Word cloud button
-    if st.button("Generate Word Cloud"):
-        st.image(wordcloud.to_image())
-    
-    # User control for the number of keywords
-    num_keywords = st.number_input("Number of keywords to display", min_value=1, max_value=20, value=10)
-    
-    # Keywords button
-    if st.button("Extract Keywords"):
-        st.subheader("Keywords:")
-        # Extract keywords using NLTK's stopwords
-        keywords = [word for word in text_to_summarize.split() if word.lower() not in stop_words][:num_keywords]
-        st.write(keywords)
+# Close the SQLite connection when the app is finished
+conn.close()
